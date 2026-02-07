@@ -7,8 +7,44 @@ VARS_FILE="/etc/gre_vars.conf"
 TG_CONF="/etc/gre_tg.conf"
 TYPE_CONF="/etc/server_type.conf"
 
-# --- Tashkhis e Noe Server (Faghat baraye bare aval) ---
+# --- Tabe' e Nasbe Pishniyaz-ha ---
+check_requirements() {
+    local missing_tools=()
+    # Check kardane abzara
+    for tool in ip iptables ping curl; do
+        if ! command -v $tool &> /dev/null; then
+            missing_tools+=($tool)
+        fi
+    done
+
+    # Check kardane module GRE
+    local module_missing=false
+    if ! lsmod | grep -q ip_gre; then
+        module_missing=true
+    fi
+
+    if [ ${#missing_tools[@]} -ne 0 ] || [ "$module_missing" = true ]; then
+        echo -e "\e[1;33m⚠️ Barkhi pishniyaz-ha nasb nistan ya module GRE faal nist.\e[0m"
+        read -p "Mikhahid pishniyaz-ha ro khodkar nasb va faal konam? (y/n): " confirm
+        if [[ "$confirm" == "y" || "$confirm" == "Y" ]]; then
+            echo "Dar hal e nasb... Lotfan sabr konid..."
+            apt update -y && apt install -y iproute2 iptables curl iputils-ping
+            modprobe ip_gre
+            modprobe gre
+            echo "ip_gre" >> /etc/modules 2>/dev/null
+            echo -e "\e[1;32m✅ Pishniyaz-ha ba movafaghiat nasb va faal shodan.\e[0m"
+        else
+            echo -e "\e[1;31m❌ Momken ast tunnel be dorosti kar nakonad!\e[0m"
+        fi
+    fi
+}
+
+# Ejraye check dar ebteda
+check_requirements
+
+# --- Tashkhis e Noe Server ---
 if [ ! -f "$TYPE_CONF" ]; then
+    echo -e "\e[1;34m--- Welcome to MrCoc Script ---\e[0m"
     echo -e "\e[1;36mIn Server kodam ast?\e[0m"
     echo "1) IRAN"
     echo "2) KHAREJ"
@@ -46,7 +82,7 @@ show_menu() {
 test_connection() {
     while true; do
         echo -e "\n\e[1;31m--- TEST PACKET LOSS ---\e[0m"
-        read -p "IPv4 Server e KHAREJ ro vared konid (ya baraye bargasht 'exit'): " test_ip
+        read -p "IPv4 Server e KHAREJ ro vared konid (ya 'exit'): " test_ip
         if [[ "$test_ip" == "exit" ]]; then break; fi
 
         echo -e "\e[1;33mDar hal e check kardane 20 packet... Sabr konid...\e[0m"
@@ -91,13 +127,11 @@ setup_tunnel() {
         echo "IRAN_IP_$num=$remoteip" >> $VARS_FILE
     fi
 
-    # MTU Handling
     default_mtu=1436
     echo -e "\e[1;35mMTU e Pishfarz $default_mtu hast.\e[0m"
     read -p "Meghdare MTU ro vared konid (Enter baraye pishfarz): " usermtu
     mtu=${usermtu:-$default_mtu}
 
-    # Create GRE Interface
     ip tunnel add gre$num mode gre remote $remoteip local $localip ttl 255
     ip link set gre$num up
     ip addr add $tip/30 dev gre$num
@@ -113,7 +147,6 @@ setup_tunnel() {
         iptables -t nat -A POSTROUTING -d $target_remote -j MASQUERADE
     fi
 
-    # Persistence
     echo "ip tunnel add gre$num mode gre remote $remoteip local $localip ttl 255" >> $CONF_FILE
     echo "ip link set gre$num up" >> $CONF_FILE
     echo "ip addr add $tip/30 dev gre$num" >> $CONF_FILE
