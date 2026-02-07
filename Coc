@@ -7,30 +7,29 @@ VARS_FILE="/etc/gre_vars.conf"
 TG_CONF="/etc/gre_tg.conf"
 
 show_menu() {
-    echo -e "\n\e[1;34m--- GRE Tunnel Manager (v2.2) ---\e[0m"
-    echo "1) Setup Tunnel (Iran to Kharej)"
-    echo "2) Telegram Notification Settings"
-    echo "3) Enable Persistence & Monitoring"
-    echo "4) Change MTU of existing Tunnels"
-    echo "5) Show Status (Tunnels & Ports)"
-    echo "6) Uninstall Everything"
-    echo "7) Exit"
+    echo -e "\n\e[1;34m--- Modiriate Tunnel GRE (Pishrafte) ---\e[0m"
+    echo "1) Sakht e Tunnel va Port Forwarding (Iran be Kharej)"
+    echo "2) Tanzimate Telegram (Baraye Ettela-resani)"
+    echo "3) Faal-sazi e Mandegari va Monitoring (Auto-Run)"
+    echo "4) Taghyire MTU dar Tunnel-haye Mojood"
+    echo "5) Namayeshe Vaziat e Tunnel-ha va Port-ha"
+    echo "6) Pak-sazi va Hazfe Kamel e Tanzimat"
+    echo "7) Khorooj"
     echo -e "\e[1;33m----------------------------------------\e[0m"
-    read -p "Please select an option [1-7]: " choice
+    read -p "Lotfan yek gozine entekhab konid [1-7]: " choice
 }
 
 setup_tunnel() {
-    read -p "Tunnel Number (1 or 2): " num
-    # استفاده از کلمات Iran و Kharej برای سادگی حداکثری
-    read -p "Enter Iran Server IPv4: " localip
-    read -p "Enter Kharej Server IPv4: " remoteip
-    read -p "Internal Tunnel IP (Default: 10.0.$num.1): " tunnelip
-    read -p "Ports to forward from Iran to Kharej (e.g. 80,443): " ports
+    read -p "Shomare Tunnel ro vared konid (1 ya 2): " num
+    read -p "IPv4 Server e IRAN ro vared konid: " localip
+    read -p "IPv4 Server e KHAREJ ro vared konid: " remoteip
+    read -p "IP Dakheli e Tunnel (Pishfarz 10.0.$num.1): " tunnelip
+    read -p "Port-haee ke mikhaid Forward beshan (Mesle 80,443): " ports
     
     # MTU handling
     default_mtu=1436
-    echo -e "\e[1;35mDefault MTU is $default_mtu\e[0m"
-    read -p "Enter MTU for this tunnel (Enter for default): " usermtu
+    echo -e "\e[1;35mMTU e Pishfarz $default_mtu hast.\e[0m"
+    read -p "Meghdare MTU ro vared konid (Baraye pishfarz Enter bezanid): " usermtu
     mtu=${usermtu:-$default_mtu}
 
     # Create GRE Interface
@@ -48,40 +47,40 @@ setup_tunnel() {
     done
     iptables -t nat -A POSTROUTING -d $tunnelip -j MASQUERADE
 
-    # Save commands for startup
+    # Save commands
     echo "ip tunnel add gre$num mode gre remote $remoteip local $localip ttl 255" >> $CONF_FILE
     echo "ip link set gre$num up" >> $CONF_FILE
     echo "ip addr add $tunnelip/30 dev gre$num" >> $CONF_FILE
     echo "ip link set dev gre$num mtu $mtu" >> $CONF_FILE
     echo "KHAREJ_IP_$num=$remoteip" >> $VARS_FILE
     
-    echo -e "\e[1;32m✅ Tunnel $num (Iran -> Kharej) created successfully!\e[0m"
+    echo -e "\e[1;32m✅ Tunnel e $num (Iran -> Kharej) ba movafaghiat sakhte shod!\e[0m"
 }
 
 change_mtu() {
-    read -p "Enter Tunnel Name (gre1 or gre2): " tname
+    read -p "Esme Tunnel ro vared konid (gre1 ya gre2): " tname
     if ip link show $tname > /dev/null 2>&1; then
         current_mtu=$(ip link show $tname | awk '{print $5}')
-        echo -e "\e[1;36mCurrent MTU for $tname is: $current_mtu\e[0m"
-        read -p "Enter NEW MTU value: " newmtu
+        echo -e "\e[1;36mMTU e feli baraye $tname: $current_mtu\e[0m"
+        read -p "Meghdare MTU e JADID ro vared konid: " newmtu
         ip link set dev $tname mtu $newmtu
         sed -i "s/ip link set dev $tname mtu.*/ip link set dev $tname mtu $newmtu/g" $CONF_FILE
-        echo -e "\e[1;32m✅ MTU updated to $newmtu for $tname.\e[0m"
+        echo -e "\e[1;32m✅ MTU Tunnel e $tname update shod.\e[0m"
     else
-        echo -e "\e[1;31m❌ Tunnel $tname not found!\e[0m"
+        echo -e "\e[1;31m❌ Tunnel e $tname peyda nashod!\e[0m"
     fi
 }
 
 setup_telegram() {
-    read -p "Bot Token: " token
-    read -p "Chat ID: " chatid
+    read -p "Telegram Bot Token: " token
+    read -p "Telegram Chat ID: " chatid
     echo "TG_TOKEN=\"$token\"" > $TG_CONF
     echo "TG_CHATID=\"$chatid\"" >> $TG_CONF
-    echo -e "\e[1;32m✅ Telegram settings saved.\e[0m"
+    echo -e "\e[1;32m✅ Tanzimate Telegram zakhire shod.\e[0m"
 }
 
 make_persistent() {
-    echo "Applying system services..."
+    echo "Dar hal e faal-sazi e service-haye system..."
     cat <<'EOF' > $MONITOR_FILE
 #!/bin/bash
 [ -f /etc/gre_tg.conf ] && source /etc/gre_tg.conf
@@ -90,12 +89,12 @@ check_and_notify() {
     IP=$1; NAME=$2
     ping -c 3 $IP > /dev/null 2>&1
     if [ $? -ne 0 ]; then
-        MESSAGE="⚠️ ALERT! Connection to $NAME ($IP) is DOWN!"
+        MESSAGE="⚠️ KHATAR! Etesal be $NAME ($IP) GHAT SHODE!"
         curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_CHATID&text=$MESSAGE"
     fi
 }
-[ ! -z "$KHAREJ_IP_1" ] && check_and_notify "$KHAREJ_IP_1" "Kharej Server 1"
-[ ! -z "$KHAREJ_IP_2" ] && check_and_notify "$KHAREJ_IP_2" "Kharej Server 2"
+[ ! -z "$KHAREJ_IP_1" ] && check_and_notify "$KHAREJ_IP_1" "Server e Kharej 1"
+[ ! -z "$KHAREJ_IP_2" ] && check_and_notify "$KHAREJ_IP_2" "Server e Kharej 2"
 EOF
     chmod +x $MONITOR_FILE
     echo "#!/bin/bash" > /usr/local/bin/gre_startup.sh
@@ -104,16 +103,17 @@ EOF
     echo "iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> /usr/local/bin/gre_startup.sh
     chmod +x /usr/local/bin/gre_startup.sh
     (crontab -l 2>/dev/null | grep -v "$MONITOR_FILE" ; echo "*/5 * * * * $MONITOR_FILE") | crontab -
-    echo -e "\e[1;32m✅ Persistence and Monitoring enabled.\e[0m"
+    echo -e "\e[1;32m✅ Mandegari va Monitoring faal shod. (Har 5 daghighye check mishavad)\e[0m"
 }
 
 uninstall() {
+    echo "Dar hal e hazfe tamame tanzimat..."
     crontab -l 2>/dev/null | grep -v "$MONITOR_FILE" | crontab - 2>/dev/null
     rm $TG_CONF $VARS_FILE $CONF_FILE $MONITOR_FILE /usr/local/bin/gre_startup.sh 2>/dev/null
     ip link set gre1 down 2>/dev/null; ip tunnel del gre1 2>/dev/null
     ip link set gre2 down 2>/dev/null; ip tunnel del gre2 2>/dev/null
     iptables -F -t nat
-    echo -e "\e[1;31m✅ All Iran and Kharej settings removed.\e[0m"
+    echo -e "\e[1;31m✅ Tamame tanzimate Iran va Kharej ba movafaghiat hazf shod.\e[0m"
 }
 
 while true; do
@@ -124,12 +124,13 @@ while true; do
         3) make_persistent ;;
         4) change_mtu ;;
         5) 
-            echo -e "\n--- Tunnel Status (Iran & Kharej) ---"
+            echo -e "\n--- Vaziat e Tunnel-ha va MTU ---"
             ip -d link show type gre | grep -E 'mtu|gre'
-            echo "--- Port Rules (NAT) ---"
+            echo "--- Port-haye Forward shode (NAT) ---"
             iptables -t nat -L PREROUTING -n -v
             ;;
         6) uninstall ;;
-        7) exit 0 ;;
+        7) echo "Khoda-fez!"; exit 0 ;;
+        *) echo -e "\e[1;31mGozine eshtebah ast!\e[0m" ;;
     esac
 done
