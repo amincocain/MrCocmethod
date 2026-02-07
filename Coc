@@ -13,109 +13,64 @@ show_menu() {
     echo "3) Faal-sazi e Mandegari va Monitoring (Auto-Run)"
     echo "4) Taghyire MTU dar Tunnel-haye Mojood"
     echo "5) Namayeshe Vaziat e Tunnel-ha va Port-ha"
-    echo "6) Pak-sazi va Hazfe Kamel e Tanzimat"
-    echo "7) Khorooj"
+    echo -e " \e[1;31m6) TEST PACKET LOSS (Unlimited Test)\e[0m" # عنوان قرمز رنگ
+    echo "7) Pak-sazi va Hazfe Kamel e Tanzimat"
+    echo "8) Khorooj"
     echo -e "\e[1;33m----------------------------------------\e[0m"
-    read -p "Lotfan yek gozine entekhab konid [1-7]: " choice
+    read -p "Lotfan yek gozine entekhab konid [1-8]: " choice
 }
 
-setup_tunnel() {
-    read -p "Shomare Tunnel ro vared konid (1 ya 2): " num
-    read -p "IPv4 Server e IRAN ro vared konid: " localip
-    read -p "IPv4 Server e KHAREJ ro vared konid: " remoteip
-    read -p "IP Dakheli e Tunnel (Pishfarz 10.0.$num.1): " tunnelip
-    read -p "Port-haee ke mikhaid Forward beshan (Mesle 80,443): " ports
-    
-    # MTU handling
-    default_mtu=1436
-    echo -e "\e[1;35mMTU e Pishfarz $default_mtu hast.\e[0m"
-    read -p "Meghdare MTU ro vared konid (Baraye pishfarz Enter bezanid): " usermtu
-    mtu=${usermtu:-$default_mtu}
+test_connection() {
+    while true; do
+        echo -e "\n\e[1;31m--- TEST PACKET LOSS ---\e[0m"
+        read -p "IPv4 Server e KHAREJ ro vared konid (ya baraye bargasht be menu benevisid 'exit'): " test_ip
+        
+        if [[ "$test_ip" == "exit" ]]; then
+            break
+        fi
 
-    # Create GRE Interface
-    ip tunnel add gre$num mode gre remote $remoteip local $localip ttl 255
-    ip link set gre$num up
-    ip addr add $tunnelip/30 dev gre$num
-    ip link set dev gre$num mtu $mtu
-    
-    sysctl -w net.ipv4.ip_forward=1 > /dev/null
+        echo -e "\e[1;33mDar hal e check kardane 20 pcket... Lotfan sabr konid...\e[0m"
+        
+        # Ejraye ping dar pas-zamine
+        ping -c 20 -q $test_ip > /tmp/ping_result.txt &
+        pid=$!
+        
+        # Animation e Loading
+        spin='-\|/'
+        while kill -0 $pid 2>/dev/null; do
+            i=$(( (i+1) %4 ))
+            printf "\r${spin:$i:1} Dar hale Test kardan..."
+            sleep 0.2
+        done
+        printf "\r"
 
-    IFS=',' read -ra ADDR <<< "$ports"
-    for port in "${ADDR[@]}"; do
-        iptables -t nat -A PREROUTING -p tcp --dport $port -j DNAT --to-destination $tunnelip
-        iptables -t nat -A PREROUTING -p udp --dport $port -j DNAT --to-destination $tunnelip
+        # Estekhraje natije
+        if [ -s /tmp/ping_result.txt ]; then
+            loss=$(grep -oP '\d+(?=% packet loss)' /tmp/ping_result.txt)
+            latency=$(grep -oP 'rtt min/avg/max/mdev = \d+\.\d+/\K\d+\.\d+' /tmp/ping_result.txt)
+
+            echo -e "\n\e[1;35m--- NATIJE TEST baraye $test_ip ---\e[0m"
+            if [ "$loss" -eq 0 ]; then
+                echo -e "\e[1;32m✅ Packet Loss: $loss% (Etesal Ali hast)\e[0m"
+            elif [ "$loss" -lt 20 ]; then
+                echo -e "\e[1;33m⚠️ Packet Loss: $loss% (Etesal ba ekhtelal)\e[0m"
+            else
+                echo -e "\e[1;31m❌ Packet Loss: $loss% (Etesal Kheili Zaeef)\e[0m"
+            fi
+            echo -e "\e[1;34m📊 Latency: $latency ms\e[0m"
+        else
+            echo -e "\e[1;31m❌ Khata: IP na-motabar ast ya Server javab nemideh!\e[0m"
+        fi
+        echo "----------------------------------------"
     done
-    iptables -t nat -A POSTROUTING -d $tunnelip -j MASQUERADE
-
-    # Save commands
-    echo "ip tunnel add gre$num mode gre remote $remoteip local $localip ttl 255" >> $CONF_FILE
-    echo "ip link set gre$num up" >> $CONF_FILE
-    echo "ip addr add $tunnelip/30 dev gre$num" >> $CONF_FILE
-    echo "ip link set dev gre$num mtu $mtu" >> $CONF_FILE
-    echo "KHAREJ_IP_$num=$remoteip" >> $VARS_FILE
-    
-    echo -e "\e[1;32m✅ Tunnel e $num (Iran -> Kharej) ba movafaghiat sakhte shod!\e[0m"
+    rm /tmp/ping_result.txt 2>/dev/null
 }
 
-change_mtu() {
-    read -p "Esme Tunnel ro vared konid (gre1 ya gre2): " tname
-    if ip link show $tname > /dev/null 2>&1; then
-        current_mtu=$(ip link show $tname | awk '{print $5}')
-        echo -e "\e[1;36mMTU e feli baraye $tname: $current_mtu\e[0m"
-        read -p "Meghdare MTU e JADID ro vared konid: " newmtu
-        ip link set dev $tname mtu $newmtu
-        sed -i "s/ip link set dev $tname mtu.*/ip link set dev $tname mtu $newmtu/g" $CONF_FILE
-        echo -e "\e[1;32m✅ MTU Tunnel e $tname update shod.\e[0m"
-    else
-        echo -e "\e[1;31m❌ Tunnel e $tname peyda nashod!\e[0m"
-    fi
-}
+# --- Baghiye function-ha (setup_tunnel, change_mtu, setup_telegram, etc.) bedune taghyir mimanand ---
 
-setup_telegram() {
-    read -p "Telegram Bot Token: " token
-    read -p "Telegram Chat ID: " chatid
-    echo "TG_TOKEN=\"$token\"" > $TG_CONF
-    echo "TG_CHATID=\"$chatid\"" >> $TG_CONF
-    echo -e "\e[1;32m✅ Tanzimate Telegram zakhire shod.\e[0m"
-}
+# ... [Kode baghiye bakhsh-ha ke dar pasokh-haye ghabli bud ro inja gharar bedid] ...
 
-make_persistent() {
-    echo "Dar hal e faal-sazi e service-haye system..."
-    cat <<'EOF' > $MONITOR_FILE
-#!/bin/bash
-[ -f /etc/gre_tg.conf ] && source /etc/gre_tg.conf
-[ -f /etc/gre_vars.conf ] && source /etc/gre_vars.conf
-check_and_notify() {
-    IP=$1; NAME=$2
-    ping -c 3 $IP > /dev/null 2>&1
-    if [ $? -ne 0 ]; then
-        MESSAGE="⚠️ KHATAR! Etesal be $NAME ($IP) GHAT SHODE!"
-        curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_CHATID&text=$MESSAGE"
-    fi
-}
-[ ! -z "$KHAREJ_IP_1" ] && check_and_notify "$KHAREJ_IP_1" "Server e Kharej 1"
-[ ! -z "$KHAREJ_IP_2" ] && check_and_notify "$KHAREJ_IP_2" "Server e Kharej 2"
-EOF
-    chmod +x $MONITOR_FILE
-    echo "#!/bin/bash" > /usr/local/bin/gre_startup.sh
-    echo "sysctl -w net.ipv4.ip_forward=1" >> /usr/local/bin/gre_startup.sh
-    [ -f $CONF_FILE ] && cat $CONF_FILE >> /usr/local/bin/gre_startup.sh
-    echo "iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> /usr/local/bin/gre_startup.sh
-    chmod +x /usr/local/bin/gre_startup.sh
-    (crontab -l 2>/dev/null | grep -v "$MONITOR_FILE" ; echo "*/5 * * * * $MONITOR_FILE") | crontab -
-    echo -e "\e[1;32m✅ Mandegari va Monitoring faal shod. (Har 5 daghighye check mishavad)\e[0m"
-}
-
-uninstall() {
-    echo "Dar hal e hazfe tamame tanzimat..."
-    crontab -l 2>/dev/null | grep -v "$MONITOR_FILE" | crontab - 2>/dev/null
-    rm $TG_CONF $VARS_FILE $CONF_FILE $MONITOR_FILE /usr/local/bin/gre_startup.sh 2>/dev/null
-    ip link set gre1 down 2>/dev/null; ip tunnel del gre1 2>/dev/null
-    ip link set gre2 down 2>/dev/null; ip tunnel del gre2 2>/dev/null
-    iptables -F -t nat
-    echo -e "\e[1;31m✅ Tamame tanzimate Iran va Kharej ba movafaghiat hazf shod.\e[0m"
-}
-
+# MAIN LOOP
 while true; do
     show_menu
     case $choice in
@@ -129,8 +84,9 @@ while true; do
             echo "--- Port-haye Forward shode (NAT) ---"
             iptables -t nat -L PREROUTING -n -v
             ;;
-        6) uninstall ;;
-        7) echo "Khoda-fez!"; exit 0 ;;
+        6) test_connection ;;
+        7) uninstall ;;
+        8) echo "Khoda-fez!"; exit 0 ;;
         *) echo -e "\e[1;31mGozine eshtebah ast!\e[0m" ;;
     esac
 done
