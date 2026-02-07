@@ -7,7 +7,7 @@ VARS_FILE="/etc/gre_vars.conf"
 TG_CONF="/etc/gre_tg.conf"
 TYPE_CONF="/etc/server_type.conf"
 
-# --- Tabe' e Nasbe Pishniyaz-ha va Check e Root ---
+# --- 1. Tabe' e Nasbe Pishniyaz-ha va Check e Root ---
 check_requirements() {
     if [ "$EUID" -ne 0 ]; then 
         echo -e "\e[1;31m❌ Lotfan script ro ba 'sudo' ya dastresi e root ejra konid!\e[0m"
@@ -15,7 +15,7 @@ check_requirements() {
     fi
 
     local missing_tools=()
-    for tool in ip iptables ping curl; do
+    for tool in ip iptables ping curl iperf3; do
         if ! command -v $tool &> /dev/null; then missing_tools+=($tool); fi
     done
 
@@ -31,13 +31,13 @@ check_requirements() {
 
     if [ ${#missing_tools[@]} -ne 0 ]; then
         echo "Dar hal e nasbe pishniyaz-ha..."
-        apt update -y && apt install -y iproute2 iptables curl iputils-ping
+        apt update -y && apt install -y iproute2 iptables curl iputils-ping iperf3
     fi
 }
 
 check_requirements
 
-# --- Tashkhis e Noe Server ---
+# --- 2. Tashkhis e Noe Server ---
 if [ ! -f "$TYPE_CONF" ]; then
     echo -e "\e[1;36mIn Server kodam ast?\e[0m"
     echo "1) IRAN"
@@ -47,100 +47,91 @@ if [ ! -f "$TYPE_CONF" ]; then
 fi
 source "$TYPE_CONF"
 
-# --- Gozine Jadid: Check e Salamat e Tunnel ---
+# --- 3. Check e Salamat e Tunnel ---
 check_tunnel_health() {
     echo -e "\n\e[1;36m--- Check kardane Salamat e Tunnel ---\e[0m"
     local tunnels=$(ip tunnel show | awk '{print $1}' | cut -d':' -f1)
-    
     if [ -z "$tunnels" ]; then
-        echo -e "\e[1;31m❌ Hich Tunnel-i dar in server sakhte nashode ast!\e[0m"
-        return
+        echo -e "\e[1;31m❌ Hich Tunnel-i dar in server sakhte nashode ast!\e[0m"; return
     fi
-
     for tun in $tunnels; do
-        local remote_internal_ip=""
-        # Peyda kardane IP dakheli e taraf e moghabel
         if [ "$SERVER_TYPE" == "IRAN" ]; then
             remote_internal_ip=$(ip addr show $tun | grep "inet " | awk '{print $2}' | cut -d'.' -f1,2,3).2
         else
             remote_internal_ip=$(ip addr show $tun | grep "inet " | awk '{print $2}' | cut -d'.' -f1,2,3).1
         fi
-
-        echo -e "Dar hale baresi e $tun (Target IP: $remote_internal_ip)..."
+        echo -e "Dar hale baresi e $tun (Target: $remote_internal_ip)..."
         if ping -c 3 -W 2 $remote_internal_ip > /dev/null 2>&1; then
             echo -e "\e[1;32m✅ Tunnel $tun SALEM ast (Ping OK).\e[0m"
         else
             echo -e "\e[1;31m❌ Tunnel $tun EKHTELAL darad (Ping Failed)!\e[0m"
-            echo "Rahnamayi: Motmaen shavid har do server roshan hastand va MTU dorost tanzim shode."
         fi
     done
 }
 
-show_menu() {
-    echo -e "\n\e[1;34m--- Menu Tunnel Priv8 MrCoc ---\e[0m"
-    if [ "$SERVER_TYPE" == "IRAN" ]; then
-        echo -e "\e[1;32m[ Mode: IRAN ]\e[0m"
-        echo "1) Sakht e Tunnel va Tanzime Port-haye Tunnel"
-        echo "2) Namayeshe Vaziat (Status)"
-        echo "3) TEST PACKET LOSS (Kharej IP)"
-        echo -e " \e[1;32m4) CHECK SALAMAT E TUNNEL (Internal Ping)\e[0m" # گزینه جدید
-        echo "5) Taghyire MTU"
-        echo "6) Pak-sazi va Hazfe Kamel (Uninstall)"
-    else
-        echo -e "\e[1;35m[ Mode: KHAREJ ]\e[0m"
-        echo "1) Sakht e Tunnel (Etesal az Iran)"
-        echo "2) Tanzimate Telegram & Monitoring"
-        echo "3) Faal-sazi e Mandegari (Auto-Run)"
-        echo -e " \e[1;32m4) CHECK SALAMAT E TUNNEL (Internal Ping)\e[0m" # گزینه جدید
-        echo "5) Taghyire MTU"
-        echo "6) Pak-sazi va Hazfe Kamel (Uninstall)"
-    fi
-    echo "7) Khorooj"
-    echo -e "\e[1;33m----------------------------------------\e[0m"
-    read -p "Lotfan yek gozine entekhab konid [1-7]: " choice
+# --- 4. Speed Test (Bandwidth Test) ---
+run_speedtest() {
+    echo -e "\n\e[1;35m--- SPEED TEST MABAIN E TUNNEL (20 Sec) ---\e[0m"
+    local tunnels=$(ip tunnel show | awk '{print $1}' | cut -d':' -f1)
+    if [ -z "$tunnels" ]; then echo -e "\e[1;31m❌ Tunnel-i peyda nashod!\e[0m"; return; fi
+    
+    for tun in $tunnels; do
+        if [ "$SERVER_TYPE" == "IRAN" ]; then
+            target_ip=$(ip addr show $tun | grep "inet " | awk '{print $2}' | cut -d'.' -f1,2,3).2
+            echo -e "\e[1;36mDar hal e Ersal e data be $target_ip (Upload Iran -> Kharej)...\e[0m"
+            iperf3 -c $target_ip -t 20
+        else
+            echo -e "\e[1;32mServer e Kharej amadeye daryaft shod. Lotfan Speed Test ro dar IRAN ejra konid.\e[0m"
+            echo "Baraye khorooj Ctrl+C bezanid."
+            iperf3 -s -1
+        fi
+    done
 }
 
+# --- 5. Test Packet Loss ba Animation ---
 test_connection() {
     while true; do
         echo -e "\n\e[1;31m--- TEST PACKET LOSS ---\e[0m"
         read -p "IPv4 Server e KHAREJ ro vared konid (ya 'exit'): " test_ip
         [[ "$test_ip" == "exit" ]] && break
-        echo -e "\e[1;33mDar hal e check kardane 20 packet...\e[0m"
+        echo -e "\e[1;33mDar hal e check kardane 20 packet... Sabr konid...\e[0m"
         ping -c 20 -q $test_ip > /tmp/ping_result.txt &
         pid=$!
         spin='-\|/'
         while kill -0 $pid 2>/dev/null; do
-            i=$(( (i+1) %4 )); printf "\r${spin:$i:1} Sabr konid..."; sleep 0.2
+            i=$(( (i+1) %4 )); printf "\r${spin:$i:1} Dar hale Test kardan..."; sleep 0.2
         done
         printf "\r"
         if [ -s /tmp/ping_result.txt ]; then
-            loss=$(grep -oP '\d+(?=% packet loss)' /tmp/ping_result.txt); latency=$(grep -oP 'rtt min/avg/max/mdev = \d+\.\d+/\K\d+\.\d+' /tmp/ping_result.txt)
-            echo -e "\n\e[1;35m--- NATIJE TEST ---\e[0m"
-            [ "$loss" -eq 0 ] && echo -e "\e[1;32m✅ Loss: $loss% (Ali)\e[0m" || echo -e "\e[1;31m❌ Loss: $loss%\e[0m"
+            loss=$(grep -oP '\d+(?=% packet loss)' /tmp/ping_result.txt)
+            latency=$(grep -oP 'rtt min/avg/max/mdev = \d+\.\d+/\K\d+\.\d+' /tmp/ping_result.txt)
+            echo -e "\n\e[1;35m--- NATIJE TEST baraye $test_ip ---\e[0m"
+            if [ "$loss" -eq 0 ]; then echo -e "\e[1;32m✅ Packet Loss: $loss% (Ali)\e[0m"
+            elif [ "$loss" -lt 20 ]; then echo -e "\e[1;33m⚠️ Packet Loss: $loss% (Ekhtelal)\e[0m"
+            else echo -e "\e[1;31m❌ Packet Loss: $loss% (Kheili Zaeef)\e[0m"; fi
             echo -e "\e[1;34m📊 Latency: $latency ms\e[0m"
         fi
     done
 }
 
+# --- 6. Sakht e Tunnel ---
 setup_tunnel() {
     read -p "Shomare Tunnel (1, 2, ...): " num
     if [ "$SERVER_TYPE" == "IRAN" ]; then
         read -p "IPv4 hamin Server (IRAN): " localip; read -p "IPv4 Server e KHAREJ: " remoteip
-        read -p "IP Dakheli e Iran (Pishfarz: 10.0.$num.1): " tip; read -p "Port-haye Tunnel (mesle 80,443): " ports
+        read -p "IP Dakheli e Iran (Pishfarz: 10.0.$num.1): " tip; read -p "Port-haye Tunnel: " ports
         target_remote="${tip%.*}.2"
     else
         read -p "IPv4 hamin Server (KHAREJ): " localip; read -p "IPv4 Server e IRAN: " remoteip
         read -p "IP Dakheli e Kharej (Pishfarz: 10.0.$num.2): " tip; echo "IRAN_IP_$num=$remoteip" >> $VARS_FILE
     fi
 
-    echo -e "\e[1;35mMTU e Pishfarz 1436 hast.\e[0m"
-    read -p "Meghdare MTU (Enter baraye pishfarz): " usermtu
-    mtu=${usermtu:-1436}
+    default_mtu=1436; echo -e "\e[1;35mMTU e Pishfarz $default_mtu hast.\e[0m"
+    read -p "MTU (Enter baraye pishfarz): " usermtu
+    mtu=${usermtu:-$default_mtu}
 
     ip tunnel add gre$num mode gre remote $remoteip local $localip ttl 255
-    ip link set gre$num up
-    ip addr add $tip/30 dev gre$num
-    ip link set dev gre$num mtu $mtu
+    ip link set gre$num up; ip addr add $tip/30 dev gre$num; ip link set dev gre$num mtu $mtu
 
     if [ "$SERVER_TYPE" == "IRAN" ]; then
         sysctl -w net.ipv4.ip_forward=1 > /dev/null
@@ -156,23 +147,26 @@ setup_tunnel() {
     echo "ip link set gre$num up" >> $CONF_FILE
     echo "ip addr add $tip/30 dev gre$num" >> $CONF_FILE
     echo "ip link set dev gre$num mtu $mtu" >> $CONF_FILE
-    echo -e "\e[1;32m✅ Tunnel $num va Port-haye Tunnel tanzim shod.\e[0m"
+    echo -e "\e[1;32m✅ Tunnel va Port-haye Tunnel tanzim shod.\e[0m"
 }
 
+# --- 7. Telegram & Monitoring ---
 setup_telegram() {
     read -p "Bot Token: " token; read -p "Chat ID: " chatid
     echo "TG_TOKEN=\"$token\"" > $TG_CONF; echo "TG_CHATID=\"$chatid\"" >> $TG_CONF
     cat <<'EOF' > $MONITOR_FILE
 #!/bin/bash
-source /etc/gre_tg.conf; source /etc/gre_vars.conf
+[ -f /etc/gre_tg.conf ] && source /etc/gre_tg.conf
+[ -f /etc/gre_vars.conf ] && source /etc/gre_vars.conf
 check() { ping -c 3 $1 > /dev/null 2>&1 || curl -s -X POST "https://api.telegram.org/bot$TG_TOKEN/sendMessage" -d "chat_id=$TG_CHATID&text=⚠️ ALERT! Server e IRAN ($1) GHAT SHOD!"; }
 for ip in $(grep "IRAN_IP_" /etc/gre_vars.conf | cut -d'=' -f2); do check $ip; done
 EOF
-    chmod +x $MONITOR_FILE; echo -e "\e[1;32m✅ Telegram zakhire shod.\e[0m"
+    chmod +x $MONITOR_FILE; echo -e "\e[1;32m✅ Telegram Monitoring zakhire shod.\e[0m"
 }
 
 make_persistent() {
-    echo "#!/bin/bash" > /usr/local/bin/gre_startup.sh; echo "sysctl -w net.ipv4.ip_forward=1" >> /usr/local/bin/gre_startup.sh
+    echo "#!/bin/bash" > /usr/local/bin/gre_startup.sh
+    echo "sysctl -w net.ipv4.ip_forward=1" >> /usr/local/bin/gre_startup.sh
     [ -f "$CONF_FILE" ] && cat "$CONF_FILE" >> /usr/local/bin/gre_startup.sh
     echo "iptables -t mangle -A FORWARD -p tcp --tcp-flags SYN,RST SYN -j TCPMSS --clamp-mss-to-pmtu" >> /usr/local/bin/gre_startup.sh
     chmod +x /usr/local/bin/gre_startup.sh
@@ -180,14 +174,15 @@ make_persistent() {
     echo -e "\e[1;32m✅ Mandegari faal shod.\e[0m"
 }
 
+# --- 8. MTU & Uninstall ---
 change_mtu() {
     read -p "Esme Tunnel (gre1, ...): " tname
     if ip link show $tname > /dev/null 2>&1; then
         current_mtu=$(ip link show $tname | awk '{print $5}')
-        read -p "MTU Jadid baraye $tname (Feli: $current_mtu): " newmtu
+        read -p "MTU Jadid (Feli: $current_mtu): " newmtu
         ip link set dev $tname mtu $newmtu
         sed -i "s/ip link set dev $tname mtu.*/ip link set dev $tname mtu $newmtu/g" $CONF_FILE
-        echo -e "\e[1;32m✅ MTU update shod.\e[0m"
+        echo -e "\e[1;32m✅ OK.\e[0m"
     fi
 }
 
@@ -198,15 +193,37 @@ uninstall() {
     iptables -F -t nat; echo -e "\e[1;31m✅ Hazf shod.\e[0m"
 }
 
+# --- 9. MAIN MENU ---
 while true; do
-    show_menu
+    echo -e "\n\e[1;34m--- Menu Tunnel Priv8 MrCoc ---\e[0m"
+    echo -e "\e[1;33mMode: $SERVER_TYPE\e[0m"
+    if [ "$SERVER_TYPE" == "IRAN" ]; then
+        echo "1) Sakht e Tunnel va Port-haye Tunnel"
+        echo "2) Status va Vaziat"
+        echo "3) TEST PACKET LOSS (External IP)"
+        echo "4) CHECK SALAMAT E TUNNEL (Internal Ping)"
+        echo "5) SPEED TEST (Upload 20s)"
+        echo "6) Taghyire MTU"
+        echo "7) Pak-sazi (Uninstall)"
+    else
+        echo "1) Sakht e Tunnel (Etesal az Iran)"
+        echo "2) Tanzimate Telegram & Monitoring"
+        echo "3) Faal-sazi e Mandegari"
+        echo "4) CHECK SALAMAT E TUNNEL"
+        echo "5) SPEED TEST (Listen Mode)"
+        echo "6) Taghyire MTU"
+        echo "7) Pak-sazi (Uninstall)"
+    fi
+    echo "8) Khorooj"
+    read -p "Entekhab: " choice
     case $choice in
         1) setup_tunnel ;;
         2) if [ "$SERVER_TYPE" == "IRAN" ]; then ip -d link show type gre; iptables -t nat -L -n -v; else setup_telegram; fi ;;
         3) if [ "$SERVER_TYPE" == "IRAN" ]; then test_connection; else make_persistent; fi ;;
         4) check_tunnel_health ;;
-        5) change_mtu ;;
-        6) uninstall ;;
-        7) echo "Khoda-fez MrCoc!"; exit 0 ;;
+        5) run_speedtest ;;
+        6) change_mtu ;;
+        7) uninstall ;;
+        8) echo "Khoda-fez MrCoc!"; exit 0 ;;
     esac
 done
